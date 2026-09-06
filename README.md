@@ -1,6 +1,6 @@
 # Generador de documentos por expediente
 
-Aplicación estática local-first para cargar tres plantillas `.docx`, definir un rango de 50 a 500 expedientes, introducir variables familiares en un solo cuadro y descargar documentos Word o ZIP.
+Aplicación estática local-first para cargar tres plantillas `.docx`, definir un rango de 50 a 500 expedientes, introducir variables en un solo cuadro y descargar documentos Word o ZIP.
 
 ## Rango de expedientes
 
@@ -8,7 +8,7 @@ Se puede escribir un número (`50`) o un rango (`1-50`, `101-150`). La aplicaci�
 
 ## Variables y correlación
 
-La entrada compartida reconoce, entre otras, estas etiquetas:
+La entrada compartida reconoce:
 
 - `(yo)` → `{persona_nombre}` en los documentos 1, 2 y 3.
 - `(papá)` o `(padre)` → `{padre_nombre}`.
@@ -17,16 +17,21 @@ La entrada compartida reconoce, entre otras, estas etiquetas:
 - `(abuela paterna)` → `{abuela_paterna}`.
 - `(abuelo materno)` → `{abuelo_materno}`.
 - `(abuela materna)` → `{abuela_materna}`.
-- `(padrino)` → `{padrino_nombre}`.
-- `(madrina)` → `{madrina_nombre}`.
+- `(padrinos)` o `(mis padrinos)` → **dos nombres de padrinos**, capturados en dos líneas o unidos por `E`.
 
-Los grupos compuestos `(mis padres)` y `(mis padrinos)` aceptan dos líneas en el orden definido. También se acepta el separador `E` cuando el usuario escribe una sola línea compuesta. Al generar documentos se construyen `{mis_padres}` y `{mis_padrinos}` con saltos de línea.
+Los padrinos se ingresan una sola vez. No se capturan por separado como `(padrino)` y `(madrina)`.
 
-Los abuelos se almacenan como cuatro variables independientes y se incorporan únicamente en las plantillas que contengan esos marcadores. Si un documento no tiene los marcadores de abuelos, no se le agregan datos de abuelos.
+La plantilla define cómo se presentan:
 
-## Vista previa
+| Marcador Word | Resultado |
+|---|---|
+| `{el_sr}` | Primer nombre de padrino, con el tratamiento `El Sr.` colocado en la plantilla |
+| `{la_sra}` | Segundo nombre de padrino, con el tratamiento `La Sra.` colocado en la plantilla |
+| `{mis_padrinos}` | Los dos nombres, en dos líneas y en el orden capturado |
 
-Después de seleccionar un expediente y un documento, la sección **Vista previa de la modificación** muestra cada marcador detectado en la plantilla y el valor que recibirá. Las palabras normales de Word no se sustituyen automáticamente.
+Así, un documento puede usar `{el_sr}` y `{la_sra}`, mientras otro utiliza `{mis_padrinos}`, sin volver a solicitar los nombres.
+
+Los grupos `(mis padres)`, `(abuelos paternos)` y `(abuelos maternos)` aceptan dos líneas en el orden definido. Los abuelos se incorporan únicamente en las plantillas que contengan sus marcadores; si un documento no los solicita, no se le agregan datos.
 
 ## Privacidad
 

@@ -24,8 +24,8 @@ await createDoc("plantilla-prueba-1.docx", "DOCUMENTO 1 · DATOS FAMILIARES", [
   "Abuela paterna: {abuela_paterna}",
   "Abuelo materno: {abuelo_materno}",
   "Abuela materna: {abuela_materna}",
-  "Padrino: {padrino_nombre}",
-  "Madrina: {madrina_nombre}",
+  "El Sr. {el_sr}",
+  "La Sra. {la_sra}",
 ]);
 await createDoc("plantilla-prueba-2.docx", "DOCUMENTO 2 · GRUPOS COMPUESTOS", [
   "Yo: {persona_nombre}",
@@ -37,7 +37,7 @@ await createDoc("plantilla-prueba-2.docx", "DOCUMENTO 2 · GRUPOS COMPUESTOS", [
 await createDoc("plantilla-prueba-3.docx", "DOCUMENTO 3 · CONSTANCIA", [
   "Se hace constar que {persona_nombre}.",
   "Padre: {padre_nombre} · Madre: {madre_nombre}",
-  "Padrino: {padrino_nombre} · Madrina: {madrina_nombre}",
+  "El Sr. {el_sr} · La Sra. {la_sra}",
   "Abuelos paternos: {abuelos_paternos}",
   "Abuelos maternos: {abuelos_maternos}",
 ]);
