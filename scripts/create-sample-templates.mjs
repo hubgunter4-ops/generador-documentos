@@ -20,10 +20,10 @@ await createDoc("plantilla-prueba-1.docx", "DOCUMENTO 1 · DATOS FAMILIARES", [
   "Yo: {persona_nombre}",
   "Papá: {padre_nombre}",
   "Mamá: {madre_nombre}",
-  "Abuelos maternos:",
-  "{abuelos_maternos}",
-  "Abuelos paternos:",
-  "{abuelos_paternos}",
+  "Abuelo paterno: {abuelo_paterno}",
+  "Abuela paterna: {abuela_paterna}",
+  "Abuelo materno: {abuelo_materno}",
+  "Abuela materna: {abuela_materna}",
   "Padrino: {padrino_nombre}",
   "Madrina: {madrina_nombre}",
 ]);
@@ -38,7 +38,7 @@ await createDoc("plantilla-prueba-3.docx", "DOCUMENTO 3 · CONSTANCIA", [
   "Se hace constar que {persona_nombre}.",
   "Padre: {padre_nombre} · Madre: {madre_nombre}",
   "Padrino: {padrino_nombre} · Madrina: {madrina_nombre}",
-  "Abuelos maternos: {abuelos_maternos}",
   "Abuelos paternos: {abuelos_paternos}",
+  "Abuelos maternos: {abuelos_maternos}",
 ]);
 console.log(`Created sample templates in ${out}`);

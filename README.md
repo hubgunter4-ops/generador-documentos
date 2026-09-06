@@ -1,55 +1,35 @@
 # Generador de documentos por expediente
 
-Aplicación estática local-first para cargar tres plantillas `.docx`, crear entre 50 y 500 expedientes, introducir datos familiares mediante etiquetas y descargar documentos Word o ZIP.
+Aplicación estática local-first para cargar tres plantillas `.docx`, definir un rango de 50 a 500 expedientes, introducir variables familiares en un solo cuadro y descargar documentos Word o ZIP.
 
-## Inicio
+## Rango de expedientes
 
-```bash
-pnpm install
-pnpm dev
-```
+Se puede escribir un número (`50`) o un rango (`1-50`, `101-150`). La aplicación crea expedientes independientes y conserva el número indicado.
 
-En la interfaz puede crear un lote con las tres plantillas de prueba integradas o cargar sus propias plantillas `.docx`.
+## Variables y correlación
 
-## Marcadores de Word
+La entrada compartida reconoce, entre otras, estas etiquetas:
 
-Use marcadores completos, sin espacios ni acentos en las claves:
+- `(yo)` → `{persona_nombre}` en los documentos 1, 2 y 3.
+- `(papá)` o `(padre)` → `{padre_nombre}`.
+- `(mamá)` o `(madre)` → `{madre_nombre}`.
+- `(abuelo paterno)` → `{abuelo_paterno}`.
+- `(abuela paterna)` → `{abuela_paterna}`.
+- `(abuelo materno)` → `{abuelo_materno}`.
+- `(abuela materna)` → `{abuela_materna}`.
+- `(padrino)` → `{padrino_nombre}`.
+- `(madrina)` → `{madrina_nombre}`.
 
-- `{persona_nombre}`
-- `{padre_nombre}`
-- `{madre_nombre}`
-- `{abuelos_maternos}`
-- `{abuelos_paternos}`
-- `{padrino_nombre}`
-- `{madrina_nombre}`
-- `{mis_padres}`
-- `{mis_padrinos}`
+Los grupos compuestos `(mis padres)` y `(mis padrinos)` aceptan dos líneas en el orden definido. También se acepta el separador `E` cuando el usuario escribe una sola línea compuesta. Al generar documentos se construyen `{mis_padres}` y `{mis_padrinos}` con saltos de línea.
 
-## Entrada compartida
+Los abuelos se almacenan como cuatro variables independientes y se incorporan únicamente en las plantillas que contengan esos marcadores. Si un documento no tiene los marcadores de abuelos, no se le agregan datos de abuelos.
 
-Ejemplo:
+## Vista previa
 
-```text
-(yo): Juan Pérez López
-(papá): Carlos Pérez Hernández
-(mamá): Ana López Martínez
-(abuelos maternos):
-Roberto López
-Elena Martínez
-(padrino): Miguel Torres Ramírez
-(madrina): Laura Gómez Castillo
-```
-
-Las equivalencias aceptadas incluyen `yo`, `nombre`, `papá`, `papa`, `padre`, `mamá`, `mama`, `madre`, `padrino` y `madrina`. También se admiten bloques `(mis padres)` y `(mis padrinos)` con exactamente dos líneas no vacías.
+Después de seleccionar un expediente y un documento, la sección **Vista previa de la modificación** muestra cada marcador detectado en la plantilla y el valor que recibirá. Las palabras normales de Word no se sustituyen automáticamente.
 
 ## Privacidad
 
-Los documentos se procesan dentro del navegador. Las plantillas y los expedientes se guardan en IndexedDB del perfil local y los respaldos se exportan manualmente como JSON. La aplicación no incluye servidor, autenticación ni sincronización remota.
+Los DOCX se procesan dentro del navegador. Las plantillas y expedientes se guardan en IndexedDB del perfil local; los respaldos se exportan manualmente como JSON. No existe servidor, autenticación ni sincronización remota.
 
 GitHub Pages puede publicar el código, pero no es un repositorio privado de expedientes. No coloque documentos personales ni respaldos JSON dentro del repositorio.
-
-## Estado de esta versión
-
-Incluye creación configurable de lotes, parser contextual, modelo `sharedData`, actualización independiente de expedientes, generación DOCX, ZIP individual y masivo, exportación/importación JSON y plantillas sintéticas de prueba.
-
-La validación más rigurosa de plantillas reales debe ejecutarse con sus documentos definitivos, especialmente si contienen marcadores divididos entre fragmentos XML, encabezados, pies de página o tablas complejas.
