@@ -9,6 +9,7 @@
     "start": "NODE_ENV=production node dist/index.js",
     "preview": "vite preview --host",
     "check": "tsc --noEmit",
+    "test:category": "node scripts/validate-category-fixture.mjs",
     "format": "prettier --write ."
   },
   "dependencies": {
