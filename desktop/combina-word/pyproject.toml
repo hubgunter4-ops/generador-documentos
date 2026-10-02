@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "combina-word"
+version = "1.0.0"
+description = "Rellena una plantilla Word con filas de Excel y genera un único documento"
+requires-python = ">=3.11"
+dependencies = [
+  "pandas>=2.2,<3",
+  "openpyxl>=3.1,<4",
+  "python-docx>=1.1,<2",
+  "docxcompose>=1.4,<2",
+]
+
+[project.scripts]
+combina-word = "app.gui:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

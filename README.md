@@ -60,3 +60,15 @@ El build genera `dist/public` para GitHub Pages y `dist/index.js` para el servid
 ## Privacidad
 
 El procesamiento del Excel y del DOCX ocurre completamente en el navegador mediante SheetJS, PizZip y Docxtemplater. No existe servidor de datos ni autenticación. No subas datos personales al repositorio.
+
+
+## Aplicación de escritorio Tkinter
+
+La aplicación de escritorio está en [`desktop/combina-word`](desktop/combina-word). Carga primero el DOCX, detecta sus marcadores o categorías visibles, después carga el Excel, detecta el número de registros y genera una copia de la plantilla por cada fila seleccionada.
+
+El workflow [`Build desktop installers`](.github/workflows/build-desktop.yml) ejecuta las pruebas y construye automáticamente:
+
+- `combina-word-deb`: paquete `.deb` para Debian/Ubuntu.
+- `combina-word-exe`: ejecutable `.exe` para Windows.
+
+Los archivos se descargan desde la sección **Artifacts** de la ejecución de GitHub Actions. La compilación se activa cuando cambian los archivos de `desktop/combina-word` o manualmente desde **Actions → Build desktop installers → Run workflow**.
