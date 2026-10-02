@@ -28,6 +28,8 @@ jobs:
         run: npm install --global pnpm@10.4.1
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Validate Excel and Word category fixture
+        run: pnpm test:category
       - name: Build
         run: pnpm build
       - name: Upload Pages artifact
