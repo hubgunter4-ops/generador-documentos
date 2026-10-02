@@ -35,6 +35,22 @@ KNOWN_CATEGORY_FIELDS = {
     "YO",
 }
 
+INFERRED_LABELS = (
+    (r"\bYO\b", "YO"),
+    (r"\bHOY\b", "FECHA_BAUTIZO"),
+    (r"\bNAC[IÍ]\s+EL\b", "FECHA_NACIMIENTO"),
+    (r"\bEN\s+SANTA\s+CRUZ\b|\bLUGAR\s+DE\s+NACIMIENTO\b", "LUGAR_NACIMIENTO"),
+    (r"\bPAP[AÁ]\b", "PAPA"),
+    (r"\bMAM[AÁ]\b", "MAMA"),
+    (r"\bABUELOS\s+PATERNOS\b", "ABUELOS_PATERNOS"),
+    (r"\bABUELOS\s+MATERNOS\b", "ABUELOS_MATERNOS"),
+    (r"\bMIS\s+PADRINOS\b", "MIS_PADRINOS"),
+    (r"\bLIBRO\b", "LIBRO"),
+    (r"\bP[AÁ]G\.?\b", "PAGINA"),
+    (r"\bPART\.?\b", "PARTIDA"),
+    (r"\bEXPEDIDA\b", "FECHA_EXPEDIDA"),
+)
+
 
 def normalize_field(value: str) -> str:
     return str(value).strip().strip("{}").strip().upper()
@@ -63,6 +79,10 @@ def detect_template_fields(template_path: str | Path) -> list[str]:
     fields: set[str] = set()
     for paragraph in _document_paragraphs(document):
         fields.update(normalize_field(match) for match in re.findall(r"\{\{([^{}]+)\}\}", paragraph.text))
+        if re.search(r"_{3,}|\.{3,}", paragraph.text):
+            for pattern, field in INFERRED_LABELS:
+                if re.search(pattern, paragraph.text, re.IGNORECASE):
+                    fields.add(field)
     for table in document.tables:
         for row in table.rows:
             for cell in row.cells:
@@ -115,6 +135,26 @@ def fill_visible_category_tables(document: Document, data: dict[str, Any]) -> No
                         paragraph.text = ""
 
 
+def fill_inferred_blank_paragraphs(document: Document, data: dict[str, Any]) -> None:
+    """Fill underline/dot blanks when a recognizable label precedes the blank."""
+    for paragraph in _document_paragraphs(document):
+        if not re.search(r"_{3,}|\.{3,}", paragraph.text):
+            continue
+        matches = []
+        for pattern, field in INFERRED_LABELS:
+            if field not in data:
+                continue
+            match = re.search(pattern, paragraph.text, re.IGNORECASE)
+            if match:
+                matches.append((match.start(), match.end(), field))
+        for start, end, field in sorted(matches, reverse=True):
+            next_starts = [item[0] for item in matches if item[0] > start]
+            segment_end = min(next_starts) if next_starts else len(paragraph.text)
+            segment = paragraph.text[end:segment_end]
+            segment = re.sub(r"_{3,}|\.{3,}", format_value(data[field]), segment, count=1)
+            paragraph.text = paragraph.text[:end] + segment + paragraph.text[segment_end:]
+
+
 def replace_in_document(document: Document, data: dict[str, Any]) -> None:
     for paragraph in document.paragraphs:
         replace_in_paragraph(paragraph, data)
@@ -125,6 +165,7 @@ def replace_in_document(document: Document, data: dict[str, Any]) -> None:
                 replace_in_paragraph(paragraph, data)
             replace_in_tables(container.tables, data)
     fill_visible_category_tables(document, data)
+    fill_inferred_blank_paragraphs(document, data)
 
 
 def add_page_break_at_end(document: Document) -> None:

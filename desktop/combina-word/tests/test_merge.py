@@ -83,3 +83,46 @@ def test_detects_and_fills_visible_categories(tmp_path: Path):
     rendered = Document(output)
     text = "\n".join(cell.text for row in rendered.tables[0].rows for cell in row.cells)
     assert "Luis / Marta" in text and "Ana" in text
+
+
+def test_detects_and_fills_labeled_blank_boxes(tmp_path: Path):
+    import pandas as pd
+
+    template = tmp_path / "baptism-blank-template.docx"
+    excel = tmp_path / "baptism-data.xlsx"
+    output = tmp_path / "baptism-output.docx"
+    doc = Document()
+    for line in (
+        "YO: ______________________________",
+        "HOY ______________________________",
+        "PAPÁ: ______________________________",
+        "MAMÁ: ______________________________",
+        "ABUELOS PATERNOS: ______________________________",
+        "MIS PADRINOS: ______________________________",
+        "Libro: __________  Pág. __________  Part. __________  Expedida: __________",
+    ):
+        doc.add_paragraph(line)
+    doc.save(template)
+    pd.DataFrame([{
+        "YO": "Daniela",
+        "FECHA_BAUTIZO": "15 de agosto de 2026",
+        "PAPA": "Alejandro",
+        "MAMA": "Lucía",
+        "ABUELOS_PATERNOS": "Jorge / Rosa",
+        "MIS_PADRINOS": "Roberto / Elena",
+        "LIBRO": "B-02",
+        "PAGINA": "15",
+        "PARTIDA": "3",
+        "FECHA_EXPEDIDA": "15/08/2026",
+    }]).to_excel(excel, index=False)
+
+    fields = detect_template_fields(template)
+    assert set(fields) == {
+        "YO", "FECHA_BAUTIZO", "PAPA", "MAMA", "ABUELOS_PATERNOS",
+        "MIS_PADRINOS", "LIBRO", "PAGINA", "PARTIDA", "FECHA_EXPEDIDA",
+    }
+    assert validate_template_fields(template, excel)[1] == []
+    assert merge_excel_into_one_docx(excel, template, output) == 1
+    text = "\n".join(paragraph.text for paragraph in Document(output).paragraphs)
+    assert all(value in text for value in ["Daniela", "15 de agosto de 2026", "B-02", "Pág. 15", "Part. 3", "15/08/2026"])
+    assert "________________" not in text
