@@ -27,22 +27,24 @@ const EMPTY: SharedData = {
   abuelo_materno: "", abuela_materna: "", padrino_nombre: "", madrina_nombre: ""
 };
 const labelMap: Record<string, string[]> = {
-  persona_nombre: ["yo", "nombre", "mi nombre"],
+  // Se evita el alias genérico "nombre": no permite saber de quién es el dato.
+  persona_nombre: ["yo", "mi nombre"],
   padre_nombre: ["papá", "papa", "padre", "mi padre"],
   madre_nombre: ["mamá", "mama", "madre", "mi madre"],
   abuelo_paterno: ["abuelo paterno", "abuelo del padre"],
   abuela_paterna: ["abuela paterna", "abuela del padre"],
   abuelo_materno: ["abuelo materno", "abuelo de la madre"],
   abuela_materna: ["abuela materna", "abuela de la madre"],
-  padrino_nombre: [],
-  madrina_nombre: []
+  padrino_nombre: ["padrino", "primer padrino", "mi padrino"],
+  madrina_nombre: ["madrina", "segunda madrina", "mi madrina"]
 };
 const displayName: Record<string, string> = {
   persona_nombre: "Yo", padre_nombre: "Papá", madre_nombre: "Mamá", abuelo_paterno: "Abuelo paterno",
   abuela_paterna: "Abuela paterna", abuelo_materno: "Abuelo materno", abuela_materna: "Abuela materna",
-  padrino_nombre: "Primer padrino", madrina_nombre: "Segundo padrino", el_sr: "El Sr.", la_sra: "La Sra.", mis_padres: "Mis padres", mis_padrinos: "Mis padrinos",
+  padrino_nombre: "Padrino (primer nombre)", madrina_nombre: "Madrina (segundo nombre)", el_sr: "El Sr.", la_sra: "La Sra.", mis_padres: "Mis padres", mis_padrinos: "Mis padrinos",
   abuelos_paternos: "Abuelos paternos", abuelos_maternos: "Abuelos maternos"
 };
+const groupLabels = new Set(["mis padres", "padrinos", "mis padrinos", "abuelos paternos", "abuelos maternos"]);
 const normalizeLabel = (value: string) => value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\./g, "").replace(/\s+/g, " ").trim();
 const keyFor = (label: string) => { const normalized = normalizeLabel(label); return Object.entries(labelMap).find(([, values]) => values.some(value => normalizeLabel(value) === normalized))?.[0] as keyof SharedData | undefined; };
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -74,17 +76,30 @@ const parseRange = (raw: string) => {
 
 function parseText(text: string) {
   const found: Partial<SharedData> = {}; const conflicts: string[] = [];
+  const assign = (key: keyof SharedData, value: string, source: string) => {
+    const clean = value.trim();
+    if (!clean) return;
+    if (found[key] !== undefined && found[key] !== clean) {
+      conflicts.push(`${source} contradice el valor anterior de ${displayName[key]}. Usa una sola persona por campo.`);
+      return;
+    }
+    found[key] = clean;
+  };
   const pattern = /\(([^)]+)\)\s*:?\s*([\s\S]*?)(?=\([^)]*\)\s*:?|$)/gi; let match: RegExpExecArray | null;
   while ((match = pattern.exec(text))) {
-    const raw = match[1].trim(); const key = keyFor(raw); if (!key) continue;
-    const value = match[2].trim(); if (found[key] !== undefined && found[key] !== value) conflicts.push(`(${raw}) tiene valores distintos para el mismo campo.`); found[key] = value;
+    const raw = match[1].trim(); const key = keyFor(raw); const normalized = normalizeLabel(raw);
+    if (!key) {
+      if (!groupLabels.has(normalized)) conflicts.push(`(${raw}) no es una etiqueta válida; no se rellenará ningún campo.`);
+      continue;
+    }
+    assign(key, match[2], `(${raw})`);
   }
   const groups: Array<[string, keyof SharedData, keyof SharedData]> = [["mis padres", "padre_nombre", "madre_nombre"], ["padrinos", "padrino_nombre", "madrina_nombre"], ["mis padrinos", "padrino_nombre", "madrina_nombre"], ["abuelos paternos", "abuelo_paterno", "abuela_paterna"], ["abuelos maternos", "abuelo_materno", "abuela_materna"]];
   for (const [group, firstKey, secondKey] of groups) {
     const groupMatch = text.match(new RegExp(`\\(${group}\\)\\s*:?[\\s\\S]*?(?=\\([^)]*\\)\\s*:?|$)`, "i"));
     if (!groupMatch) continue;
     const lines = groupMatch[0].replace(/^\([^)]*\)\s*:?/i, "").trim().split(/\n|\s+E\s+/i).map(line => line.trim()).filter(Boolean);
-    if (lines.length === 2) { found[firstKey] = found[firstKey] ?? lines[0]; found[secondKey] = found[secondKey] ?? lines[1]; }
+    if (lines.length === 2) { assign(firstKey, lines[0], `(${group})`); assign(secondKey, lines[1], `(${group})`); }
     else if (lines.length !== 0) conflicts.push(`(${group}) requiere los dos nombres, en líneas separadas o unidos por «E».`);
   }
   return { found, conflicts };
