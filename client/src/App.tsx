@@ -1,147 +1,160 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, FileArchive, FileText, Info, Plus, Save, ShieldCheck, Upload, Users } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Download, FileSpreadsheet, FileText, Info, ShieldCheck, Upload } from "lucide-react";
+import * as XLSX from "xlsx";
 import PizZip from "pizzip";
 import Docxtemplater from "docxtemplater";
-import JSZip from "jszip";
-import { renderAsync } from "docx-preview";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 
-type SharedData = {
-  persona_nombre: string; padre_nombre: string; madre_nombre: string;
-  abuelo_paterno: string; abuela_paterna: string; abuelo_materno: string; abuela_materna: string;
-  padrino_nombre: string; madrina_nombre: string;
+const FIELD_LABELS: Record<string, string> = {
+  persona_nombre: "Yo",
+  mis_padres: "Mis padres",
+  mis_padrinos: "Mis padrinos",
+  abuelos_paternos: "Abuelos paternos",
+  abuelos_maternos: "Abuelos maternos",
+  el_sr: "El Sr.",
+  la_sra: "La Sra.",
 };
-type Template = { name: string; data: ArrayBuffer; markers: string[] };
-type RecordItem = { id: string; batchId: string; number: number; sourceText: string; sharedData: SharedData; documents: Record<string, string>[]; updatedAt: string };
-type Batch = { id: string; createdAt: string; templates: Template[] };
+const FIELD_KEYS = Object.keys(FIELD_LABELS);
+type FieldKey = keyof typeof FIELD_LABELS;
+type ExcelRow = Record<string, string>;
+type ExcelData = { rows: ExcelRow[]; columns: string[]; ignoredColumns: string[] };
 
-const EMPTY: SharedData = {
-  persona_nombre: "", padre_nombre: "", madre_nombre: "", abuelo_paterno: "", abuela_paterna: "",
-  abuelo_materno: "", abuela_materna: "", padrino_nombre: "", madrina_nombre: ""
-};
-const labelMap: Record<string, string[]> = {
-  // Se evita el alias genérico "nombre": no permite saber de quién es el dato.
-  persona_nombre: ["yo", "mi nombre"],
-  padre_nombre: ["papá", "papa", "padre", "mi padre"],
-  madre_nombre: ["mamá", "mama", "madre", "mi madre"],
-  abuelo_paterno: ["abuelo paterno", "abuelo del padre"],
-  abuela_paterna: ["abuela paterna", "abuela del padre"],
-  abuelo_materno: ["abuelo materno", "abuelo de la madre"],
-  abuela_materna: ["abuela materna", "abuela de la madre"],
-  padrino_nombre: ["padrino", "primer padrino", "mi padrino"],
-  madrina_nombre: ["madrina", "segunda madrina", "mi madrina"]
-};
-const displayName: Record<string, string> = {
-  persona_nombre: "Yo", padre_nombre: "Papá", madre_nombre: "Mamá", abuelo_paterno: "Abuelo paterno",
-  abuela_paterna: "Abuela paterna", abuelo_materno: "Abuelo materno", abuela_materna: "Abuela materna",
-  padrino_nombre: "Padrino (primer nombre)", madrina_nombre: "Madrina (segundo nombre)", el_sr: "El Sr.", la_sra: "La Sra.", mis_padres: "Mis padres", mis_padrinos: "Mis padrinos",
-  abuelos_paternos: "Abuelos paternos", abuelos_maternos: "Abuelos maternos"
-};
-const groupLabels = new Set(["mis padres", "padrinos", "mis padrinos", "abuelos paternos", "abuelos maternos"]);
-const normalizeLabel = (value: string) => value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\./g, "").replace(/\s+/g, " ").trim();
-const keyFor = (label: string) => { const normalized = normalizeLabel(label); return Object.entries(labelMap).find(([, values]) => values.some(value => normalizeLabel(value) === normalized))?.[0] as keyof SharedData | undefined; };
-const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-const uid = () => crypto.randomUUID();
-const buildContextFields = (data: Partial<SharedData> = {}) => {
-  const read = (key: keyof SharedData) => String(data[key] ?? "").trim();
-  const fields = {
-    persona_nombre: read("persona_nombre"), padre_nombre: read("padre_nombre"), madre_nombre: read("madre_nombre"),
-    abuelo_paterno: read("abuelo_paterno"), abuela_paterna: read("abuela_paterna"), abuelo_materno: read("abuelo_materno"), abuela_materna: read("abuela_materna"),
-    padrino_nombre: read("padrino_nombre"), madrina_nombre: read("madrina_nombre")
-  };
-  return {
-    ...fields,
-    abuelos_paternos: [fields.abuelo_paterno, fields.abuela_paterna].filter(Boolean).join("\n"),
-    abuelos_maternos: [fields.abuelo_materno, fields.abuela_materna].filter(Boolean).join("\n"),
-    el_sr: fields.padrino_nombre,
-    la_sra: fields.madrina_nombre,
-    mis_padres: [fields.padre_nombre, fields.madre_nombre].filter(Boolean).join("\n"),
-    mis_padrinos: [fields.padrino_nombre, fields.madrina_nombre].filter(Boolean).join("\n")
-  };
-};
-const parseRange = (raw: string) => {
-  const value = raw.trim().replace(/\s+/g, "");
-  const parts = value.split(/(?:\.\.|-|–|—|a)/i).filter(Boolean).map(Number);
-  if (parts.length === 1 && Number.isInteger(parts[0])) return parts[0] >= 50 && parts[0] <= 500 ? Array.from({ length: parts[0] }, (_, i) => i + 1) : null;
-  if (parts.length === 2 && parts.every(Number.isInteger)) { const [start, end] = parts; const amount = end - start + 1; return start >= 1 && end >= start && amount >= 50 && amount <= 500 ? Array.from({ length: amount }, (_, i) => start + i) : null; }
-  return null;
-};
+function normalizeField(value: string) {
+  return value.trim().replace(/^\{+|\}+$/g, "").toLowerCase();
+}
 
-function parseText(text: string) {
-  const found: Partial<SharedData> = {}; const conflicts: string[] = [];
-  const assign = (key: keyof SharedData, value: string, source: string) => {
-    const clean = value.trim();
-    if (!clean) return;
-    if (found[key] !== undefined && found[key] !== clean) {
-      conflicts.push(`${source} contradice el valor anterior de ${displayName[key]}. Usa una sola persona por campo.`);
-      return;
-    }
-    found[key] = clean;
-  };
-  const pattern = /\(([^)]+)\)\s*:?\s*([\s\S]*?)(?=\([^)]*\)\s*:?|$)/gi; let match: RegExpExecArray | null;
-  while ((match = pattern.exec(text))) {
-    const raw = match[1].trim(); const key = keyFor(raw); const normalized = normalizeLabel(raw);
-    if (!key) {
-      if (!groupLabels.has(normalized)) conflicts.push(`(${raw}) no es una etiqueta válida; no se rellenará ningún campo.`);
-      continue;
-    }
-    assign(key, match[2], `(${raw})`);
-  }
-  const groups: Array<[string, keyof SharedData, keyof SharedData]> = [["mis padres", "padre_nombre", "madre_nombre"], ["padrinos", "padrino_nombre", "madrina_nombre"], ["mis padrinos", "padrino_nombre", "madrina_nombre"], ["abuelos paternos", "abuelo_paterno", "abuela_paterna"], ["abuelos maternos", "abuelo_materno", "abuela_materna"]];
-  for (const [group, firstKey, secondKey] of groups) {
-    const groupMatch = text.match(new RegExp(`\\(${group}\\)\\s*:?[\\s\\S]*?(?=\\([^)]*\\)\\s*:?|$)`, "i"));
-    if (!groupMatch) continue;
-    const lines = groupMatch[0].replace(/^\([^)]*\)\s*:?/i, "").trim().split(/\n|\s+E\s+/i).map(line => line.trim()).filter(Boolean);
-    if (lines.length === 2) { assign(firstKey, lines[0], `(${group})`); assign(secondKey, lines[1], `(${group})`); }
-    else if (lines.length !== 0) conflicts.push(`(${group}) requiere los dos nombres, en líneas separadas o unidos por «E».`);
-  }
-  return { found, conflicts };
+function cellText(value: unknown) {
+  if (value === null || value === undefined) return "";
+  if (value instanceof Date) return value.toLocaleDateString("es-MX");
+  return String(value).trim();
+}
+
+async function readExcel(file: File): Promise<ExcelData> {
+  const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  if (!sheet) throw new Error("El archivo Excel no contiene hojas.");
+  const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
+  if (!rawRows.length) throw new Error("El archivo Excel no contiene filas de datos.");
+
+  const originalColumns = Object.keys(rawRows[0]);
+  const normalizedColumns = originalColumns.map(normalizeField);
+  const duplicates = normalizedColumns.filter((field, index) => normalizedColumns.indexOf(field) !== index);
+  if (duplicates.length) throw new Error(`Hay columnas repetidas en Excel: ${Array.from(new Set(duplicates)).join(", ")}. Cada campo debe tener una sola columna.`);
+
+  const recognized = normalizedColumns.filter(field => FIELD_KEYS.includes(field));
+  if (!recognized.length) throw new Error(`No se encontró ninguna columna válida. Usa: ${FIELD_KEYS.join(", ")}.`);
+  const ignoredColumns = normalizedColumns.filter(field => !FIELD_KEYS.includes(field));
+  const rows = rawRows.map((raw) => {
+    const result: ExcelRow = {};
+    originalColumns.forEach((column, index) => {
+      const field = normalizedColumns[index];
+      if (FIELD_KEYS.includes(field)) result[field] = cellText(raw[column]);
+    });
+    return result;
+  });
+  return { rows, columns: recognized, ignoredColumns };
 }
 
 function extractMarkers(buffer: ArrayBuffer) {
-  try {
-    const zip = new PizZip(buffer.slice(0)); const xmlFiles = Object.keys(zip.files).filter(name => name.endsWith(".xml") && (name.includes("document") || name.includes("header") || name.includes("footer")));
-    const text = xmlFiles.map(name => zip.file(name)?.asText().replace(/<[^>]+>/g, "") ?? "").join(" ");
-    return Array.from(new Set(Array.from(text.matchAll(/\{([^{}]+)\}/g), match => match[1].trim())));
-  } catch { return []; }
+  const zip = new PizZip(buffer.slice(0));
+  const xml = Object.keys(zip.files)
+    .filter((name) => name.endsWith(".xml") && (name.includes("document") || name.includes("header") || name.includes("footer")))
+    .map((name) => zip.file(name)?.asText() ?? "")
+    .join(" ");
+  return Array.from(new Set(Array.from(xml.matchAll(/\{([^{}]+)\}/g)).map((match) => normalizeField(match[1])))).filter(Boolean);
 }
-async function openDB() { return new Promise<IDBDatabase>((resolve, reject) => { const request = indexedDB.open("generador-documentos", 1); request.onupgradeneeded = () => { request.result.createObjectStore("batches", { keyPath: "id" }); request.result.createObjectStore("records", { keyPath: "id" }); }; request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); }
-async function dbAll<T>(store: string) { const db = await openDB(); return new Promise<T[]>((resolve, reject) => { const request = db.transaction(store).objectStore(store).getAll(); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); }
-async function dbPut(store: string, value: unknown) { const db = await openDB(); return new Promise<void>((resolve, reject) => { const request = db.transaction(store, "readwrite").objectStore(store).put(value); request.onsuccess = () => resolve(); request.onerror = () => reject(request.error); }); }
-async function dbClear() { const db = await openDB(); return new Promise<void>((resolve, reject) => { const transaction = db.transaction(["batches", "records"], "readwrite"); transaction.objectStore("batches").clear(); transaction.objectStore("records").clear(); transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error); }); }
-async function demoDoc(title: string, body: string) { const zip = new JSZip(); const files: Record<string, string> = { "[Content_Types].xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`, "_rels/.rels": `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`, "word/_rels/document.xml.rels": `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>` }; const paragraphs = body.split("\n").map(line => `<w:p><w:r><w:t xml:space="preserve">${esc(line)}</w:t></w:r></w:p>`).join(""); files["word/document.xml"] = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>${esc(title)}</w:t></w:r></w:p>${paragraphs}<w:sectPr/></w:body></w:document>`; Object.entries(files).forEach(([name, content]) => zip.file(name, content)); return zip.generateAsync({ type: "arraybuffer" }); }
-function download(blob: Blob, name: string) { const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000); }
-function normalizeRecord(record: RecordItem): RecordItem { return { ...record, sharedData: { ...EMPTY, ...(record.sharedData || {}) }, documents: record.documents?.length === 3 ? record.documents : [{}, {}, {}] }; }
+
+function renderRow(template: ArrayBuffer, row: ExcelRow) {
+  const engine = new Docxtemplater(new PizZip(template.slice(0)), { paragraphLoop: true, linebreaks: true, nullGetter: () => "" });
+  engine.render(Object.fromEntries(FIELD_KEYS.map((key) => [key, row[key] ?? ""])));
+  return engine.getZip().generate({ type: "arraybuffer", compression: "DEFLATE" }) as ArrayBuffer;
+}
+
+function mergeDocxDocuments(documents: ArrayBuffer[]) {
+  if (!documents.length) throw new Error("No hay documentos para combinar.");
+  const first = new PizZip(documents[0].slice(0));
+  const firstXml = first.file("word/document.xml")?.asText();
+  if (!firstXml) throw new Error("La plantilla Word no contiene word/document.xml.");
+  const bodies = documents.map((buffer) => {
+    const xml = new PizZip(buffer.slice(0)).file("word/document.xml")?.asText();
+    const match = xml?.match(/<w:body[^>]*>([\s\S]*?)<\/w:body>/);
+    if (!match) throw new Error("No se pudo leer el cuerpo de la plantilla Word.");
+    return match[1].replace(/<w:sectPr[\s\S]*?<\/w:sectPr>/, "");
+  });
+  const sectPr = firstXml.match(/<w:sectPr[\s\S]*?<\/w:sectPr>/)?.[0] ?? "";
+  const body = bodies.join('<w:p><w:r><w:br w:type="page"/></w:r></w:p>');
+  first.file("word/document.xml", firstXml.replace(/<w:body[^>]*>[\s\S]*?<\/w:body>/, `<w:body>${body}${sectPr}</w:body>`));
+  return first.generate({ type: "blob", compression: "DEFLATE" }) as Blob;
+}
+
+function download(blob: Blob, name: string) {
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
 
 export default function App() {
-  const [batches, setBatches] = useState<Batch[]>([]); const [records, setRecords] = useState<RecordItem[]>([]); const [selected, setSelected] = useState(0); const [docIndex, setDocIndex] = useState(0); const [rangeText, setRangeText] = useState("1-50"); const [text, setText] = useState(""); const [saving, setSaving] = useState(false); const [busy, setBusy] = useState(false); const [previewBlob, setPreviewBlob] = useState<Blob | null>(null); const [previewOpen, setPreviewOpen] = useState(false); const [previewBusy, setPreviewBusy] = useState(false); const previewRef = useRef<HTMLDivElement>(null); const [files, setFiles] = useState<(File | null)[]>([null, null, null]);
-  const record = records[selected]; const batch = batches.find(item => item.id === record?.batchId); const currentTemplates = batch?.templates || []; const data = record?.sharedData || EMPTY; const context = buildContextFields(data); const activeTemplate = currentTemplates[docIndex];
-  useEffect(() => { if (!previewOpen || !previewBlob || !previewRef.current) return; const target = previewRef.current; target.innerHTML = ""; renderAsync(previewBlob, target, undefined, { className: "docx-preview" }).catch(() => { target.textContent = "No se pudo renderizar esta plantilla en la vista previa."; }); }, [previewOpen, previewBlob]);
-  useEffect(() => { (async () => { try { const [loadedBatches, loadedRecords] = await Promise.all([dbAll<Batch>("batches"), dbAll<RecordItem>("records")]); setBatches(loadedBatches); const normalized = loadedRecords.map(normalizeRecord).sort((a, b) => a.number - b.number); setRecords(normalized); if (normalized[0]) setText(normalized[0].sourceText || ""); } catch { toast.error("No se pudo abrir el almacenamiento local."); } })(); }, []);
-  const missing = useMemo(() => [data.persona_nombre ? "" : "Yo", data.padre_nombre ? "" : "Papá", data.madre_nombre ? "" : "Mamá"].filter(Boolean), [data]);
-  const updateRecord = (next: RecordItem) => { setRecords(previous => previous.map(item => item.id === next.id ? next : item)); setSaving(true); dbPut("records", next).then(() => setSaving(false)).catch(() => toast.error("No se pudo guardar el expediente.")); };
-  const changeText = (value: string) => { setText(value); if (!record) return; const parsed = parseText(value); updateRecord({ ...record, sourceText: value, sharedData: { ...record.sharedData, ...parsed.found }, updatedAt: new Date().toISOString() }); if (parsed.conflicts.length) toast.warning(parsed.conflicts.join(" ")); };
-  const selectRecord = (index: number) => { setSelected(index); setText(records[index]?.sourceText || ""); setDocIndex(0); };
-  const createBatch = async () => {
-    const numbers = parseRange(rangeText); if (!numbers) { toast.error("Escribe un rango válido, por ejemplo 1-50 o 101-150. Debe contener entre 50 y 500 expedientes."); return; }
-    if (files.some(file => !file) && !files.every(Boolean)) { toast.error("Carga las tres plantillas o utiliza las tres plantillas de prueba."); return; }
-    const titles = ["DOCUMENTO 1 · DATOS FAMILIARES", "DOCUMENTO 2 · GRUPOS COMPUESTOS", "DOCUMENTO 3 · CONSTANCIA"]; const sampleBodies = ["Yo: {persona_nombre}\nPapá: {padre_nombre}\nMamá: {madre_nombre}\nAbuelo paterno: {abuelo_paterno}\nAbuela paterna: {abuela_paterna}\nAbuelo materno: {abuelo_materno}\nAbuela materna: {abuela_materna}\nEl Sr. {el_sr}\nLa Sra. {la_sra}", "Yo: {persona_nombre}\nMis padres:\n{mis_padres}\nMis padrinos:\n{mis_padrinos}", "Se hace constar que {persona_nombre}.\nPadre: {padre_nombre} · Madre: {madre_nombre}\nEl Sr. {el_sr}\nLa Sra. {la_sra}\nAbuelos paternos: {abuelos_paternos}\nAbuelos maternos: {abuelos_maternos}"];
-    const templates: Template[] = []; for (let i = 0; i < 3; i++) { const file = files[i]; const array = file ? await file.arrayBuffer() : await demoDoc(titles[i], sampleBodies[i]); templates.push({ name: file?.name || `plantilla-prueba-${i + 1}.docx`, data: array, markers: file ? extractMarkers(array) : extractMarkers(array) }); }
-    const batchId = uid(); const newBatch: Batch = { id: batchId, createdAt: new Date().toISOString(), templates }; const newRecords = numbers.map(number => ({ id: uid(), batchId, number, sourceText: "", sharedData: { ...EMPTY }, documents: [{}, {}, {}], updatedAt: new Date().toISOString() })); await dbPut("batches", newBatch); for (const item of newRecords) await dbPut("records", item); setBatches([newBatch]); setRecords(newRecords); setSelected(0); setText(""); toast.success(`Lote creado con ${newRecords.length} expedientes.`);
-  };
-  const renderDoc = async (item: RecordItem, index: number) => { const template = batches.find(current => current.id === item.batchId)?.templates[index]; if (!template) throw Error("Plantilla no encontrada"); const engine = new Docxtemplater(new PizZip(template.data.slice(0)), { paragraphLoop: true, linebreaks: true, nullGetter: () => "" }); engine.render({ ...buildContextFields(item.sharedData), ...item.documents[index] }); return engine.getZip().generate({ type: "blob", compression: "DEFLATE" }) as Blob; };
-  const downloadOne = async () => { if (!record) return toast.error("Crea un lote primero."); try { download(await renderDoc(record, docIndex), `Expediente_${String(record.number).padStart(3, "0")}_Documento_${docIndex + 1}.docx`); } catch { toast.error("La plantilla no pudo procesarse. Verifica sus marcadores DOCX."); } };
-  const previewOne = async () => { if (!record) return toast.error("Crea un lote primero."); setPreviewBusy(true); try { setPreviewBlob(await renderDoc(record, docIndex)); setPreviewOpen(true); } catch { toast.error("La plantilla no pudo procesarse. Verifica sus marcadores DOCX."); } finally { setPreviewBusy(false); } };
-  const downloadZip = async (all: boolean) => { if (!record) return; setBusy(true); try { const zip = new JSZip(); for (const item of (all ? records : [record])) { const folder = zip.folder(`Expediente_${String(item.number).padStart(3, "0")}`)!; for (let index = 0; index < 3; index++) folder.file(`Documento_${index + 1}.docx`, await renderDoc(item, index)); } download(await zip.generateAsync({ type: "blob", compression: "DEFLATE" }), all ? "Todos_los_expedientes.zip" : `Expediente_${String(record.number).padStart(3, "0")}.zip`); toast.success("ZIP generado correctamente."); } catch { toast.error("No se pudo generar el ZIP."); } finally { setBusy(false); } };
-  const exportBackup = () => download(new Blob([JSON.stringify({ version: 2, exportedAt: new Date().toISOString(), batches, records }, null, 2)], { type: "application/json" }), "respaldo_generador_documentos.json");
-  const importBackup = (file: File) => { const reader = new FileReader(); reader.onload = async () => { try { const parsed = JSON.parse(String(reader.result)); if (![1, 2].includes(parsed.version) || !Array.isArray(parsed.batches) || !Array.isArray(parsed.records)) throw Error(); if (!confirm("La importación reemplazará los datos locales actuales. ¿Continuar?")) return; await dbClear(); for (const item of parsed.batches) await dbPut("batches", item); const restored = parsed.records.map(normalizeRecord); for (const item of restored) await dbPut("records", item); setBatches(parsed.batches); setRecords(restored); setSelected(0); setText(restored[0]?.sourceText || ""); toast.success("Respaldo importado."); } catch { toast.error("Respaldo inválido: no se modificaron los datos actuales."); } }; reader.readAsText(file); };
+  const [template, setTemplate] = useState<ArrayBuffer | null>(null);
+  const [templateName, setTemplateName] = useState("");
+  const [markers, setMarkers] = useState<string[]>([]);
+  const [excelName, setExcelName] = useState("");
+  const [excel, setExcel] = useState<ExcelData | null>(null);
+  const [outputName, setOutputName] = useState("documentos_generados.docx");
+  const [busy, setBusy] = useState(false);
 
-  return <div className="min-h-screen bg-[#f4f6f4] text-slate-900"><header className="border-b bg-[#0f2f2b] text-white"><div className="container flex items-center justify-between py-7"><div><div className="flex items-center gap-3"><div className="rounded-xl bg-[#d2f34c] p-2 text-[#0f2f2b]"><FileText size={22} /></div><span className="text-xs font-semibold uppercase tracking-[.24em] text-[#d2f34c]">Herramienta local</span></div><h1 className="mt-3 text-3xl font-semibold tracking-tight">Generador de documentos</h1><p className="mt-1 text-sm text-emerald-100/75">Relación de variables · expedientes independientes · privacidad por diseño</p></div><div className="hidden items-center gap-2 text-xs text-emerald-100/80 md:flex"><ShieldCheck size={16} /> Los datos permanecen en este navegador</div></div></header><main className="container space-y-6 py-8"><section className="grid gap-6 lg:grid-cols-[1.05fr_.95fr]"><Card className="border-0 shadow-sm"><CardHeader><div className="flex items-center justify-between"><div><CardTitle>1. Plantillas y rango</CardTitle><CardDescription>Carga tres .docx y define el rango escrito de expedientes.</CardDescription></div><Badge variant="secondary">{batches.length ? "Lote activo" : "Sin lote"}</Badge></div></CardHeader><CardContent className="space-y-4"><div className="grid gap-3 sm:grid-cols-3">{[0, 1, 2].map(index => <label key={index} className="group cursor-pointer rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 transition hover:border-emerald-700 hover:bg-emerald-50"><input type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" className="sr-only" onChange={event => { const next = [...files]; const selectedFile = event.target.files?.[0] || null; next[index] = selectedFile && selectedFile.name.toLowerCase().endsWith(".docx") ? selectedFile : null; if (selectedFile && !selectedFile.name.toLowerCase().endsWith(".docx")) toast.error("Solo se aceptan archivos .docx."); setFiles(next); }} /><span className="text-xs font-bold uppercase tracking-wider text-slate-500">Documento {index + 1}</span><span className="mt-2 block truncate text-sm font-medium">{files[index]?.name || "Seleccionar .docx"}</span><span className="mt-3 flex items-center gap-1 text-xs text-emerald-800"><Upload size={14} /> Elegir plantilla</span></label>)}</div><div className="flex flex-wrap items-end gap-3"><div className="w-48"><Label htmlFor="range">Rango de expedientes</Label><Input id="range" value={rangeText} onChange={event => setRangeText(event.target.value)} placeholder="1-50" aria-describedby="range-help" /></div><Button onClick={createBatch}><Plus size={16} /> Crear expedientes</Button><p id="range-help" className="max-w-xs text-xs text-slate-500">Ejemplos: <b>1-50</b>, <b>101-150</b> o <b>50</b>. Se admiten entre 50 y 500.</p></div></CardContent></Card><Card className="border-0 bg-[#e8efe8] shadow-sm"><CardHeader><CardTitle>Relación de variables</CardTitle><CardDescription>Los datos comunes se aplican únicamente al expediente seleccionado.</CardDescription></CardHeader><CardContent><div className="grid grid-cols-2 gap-2 text-sm">{Object.entries(displayName).filter(([key]) => !key.startsWith("mis_") && !key.startsWith("abuelos_")).map(([key, name]) => <div key={key} className="rounded-lg bg-white/70 px-3 py-2"><div className="font-medium">{name}</div><code className="text-[11px] text-emerald-800">{'{' + key + '}'}</code></div>)}</div><div className="mt-4 flex gap-2 text-xs text-slate-600"><Info size={15} className="mt-0.5 shrink-0" /><span><b>Mis padres</b> y <b>mis padrinos</b> se generan en dos líneas, en orden: padre/madre y Sr./Sra. Los abuelos solo se insertan donde la plantilla tenga esos marcadores.</span></div></CardContent></Card></section>{record && <><section className="grid gap-6 lg:grid-cols-[240px_1fr]"><Card className="border-0 shadow-sm"><CardHeader><CardTitle className="text-base">2. Elegir expediente</CardTitle><CardDescription>{records.length} disponibles · solo se edita el seleccionado</CardDescription></CardHeader><CardContent className="p-2"><div className="max-h-[430px] overflow-auto pr-1">{records.map((item, index) => <button key={item.id} onClick={() => selectRecord(index)} className={`mb-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${index === selected ? "bg-[#0f2f2b] text-white" : "hover:bg-slate-100"}`}><span>Expediente {String(item.number).padStart(3, "0")}</span>{item.sourceText && <span className="h-2 w-2 rounded-full bg-[#d2f34c]" />}</button>)}</div></CardContent></Card><Card className="border-0 shadow-sm"><CardHeader><div className="flex flex-wrap items-center justify-between gap-3"><div><CardTitle className="flex items-center gap-2"><Users size={19} /> Expediente {String(record.number).padStart(3, "0")}</CardTitle><CardDescription>La entrada se guarda en este expediente y no modifica los demás.</CardDescription></div><Badge variant="outline" className={saving ? "border-amber-400 text-amber-700" : "border-emerald-300 text-emerald-800"}>{saving ? "Guardando…" : "Cambios guardados"}</Badge></div></CardHeader><CardContent className="space-y-4"><Textarea value={text} onChange={event => changeText(event.target.value)} placeholder={'(yo): Juan Pérez López\n(papá): Carlos Pérez Hernández\n(mamá): Ana López Martínez\n(padrinos): Miguel Torres\nLaura Gómez'} className="min-h-[245px] resize-y font-mono text-sm" /><div className="flex flex-wrap items-center gap-2 text-xs text-slate-500"><span>Etiquetas:</span>{["yo", "papá", "mamá", "padrinos"].map(label => <code key={label} className="rounded bg-slate-100 px-1.5 py-0.5">({label})</code>)}<span className="ml-1">Dos nombres, en líneas separadas o unidos por «E».</span></div>{missing.length > 0 && <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"><b>Campos principales vacíos:</b> {missing.join(", ")}. Los abuelos son opcionales y no se inventará información.</div>}<Separator /><div className="flex flex-wrap items-center gap-2"><Label htmlFor="doc" className="mr-1">Documento</Label><select id="doc" value={docIndex} onChange={event => setDocIndex(Number(event.target.value))} className="h-9 max-w-full rounded-md border bg-white px-3 text-sm">{currentTemplates.map((template, index) => <option key={index} value={index}>Documento {index + 1} · {template.name}</option>)}</select><Button variant="outline" onClick={previewOne} disabled={previewBusy}><FileText size={16} /> {previewBusy ? "Preparando…" : "Previsualizar"}</Button><Button variant="outline" onClick={downloadOne}><Download size={16} /> Descargar DOCX</Button><Button variant="outline" onClick={() => downloadZip(false)} disabled={busy}><FileArchive size={16} /> Expediente ZIP</Button><Button onClick={() => downloadZip(true)} disabled={busy}><FileArchive size={16} /> Todos ({records.length})</Button></div></CardContent></Card></section><section className="grid gap-6 lg:grid-cols-[1.1fr_.9fr]"><Card className="border-0 shadow-sm"><CardHeader><CardTitle className="text-base">3. Vista previa de la modificación</CardTitle><CardDescription>Así se correlacionan los marcadores de la plantilla seleccionada con los datos del expediente.</CardDescription></CardHeader><CardContent className="space-y-2">{activeTemplate?.markers?.length ? activeTemplate.markers.map(marker => <div key={marker} className="flex items-start justify-between gap-4 rounded-lg bg-slate-50 px-3 py-2 text-sm"><div><code className="text-emerald-800">{'{' + marker + '}'}</code><div className="text-xs text-slate-500">{displayName[marker] || "Marcador particular"}</div></div><span className="max-w-[55%] whitespace-pre-line text-right font-medium text-slate-700">{String(context[marker as keyof typeof context] || "(vacío)")}</span></div>) : <div className="rounded-lg border border-dashed p-4 text-sm text-slate-500">No se detectaron marcadores en esta plantilla. No se reemplazarán palabras normales sin confirmación.</div>}<div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-950"><b>Regla de aplicación:</b> los valores de abuelos se muestran únicamente si el documento seleccionado tiene sus marcadores; no se agregan datos a documentos que no los solicitan.</div></CardContent></Card><Card className="border-0 shadow-sm"><CardHeader><CardTitle className="text-base">Respaldos editables</CardTitle><CardDescription>El JSON puede contener información personal. Guárdalo de forma segura.</CardDescription></CardHeader><CardContent className="flex flex-wrap gap-2"><Button variant="outline" onClick={exportBackup}><Save size={16} /> Exportar JSON</Button><label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md border bg-white px-4 text-sm font-medium hover:bg-slate-50"><Upload size={16} /> Importar JSON<input type="file" accept=".json,application/json" className="sr-only" onChange={event => event.target.files?.[0] && importBackup(event.target.files[0])} /></label></CardContent></Card></section></>}<section className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4 text-sm text-emerald-950"><div className="flex gap-3"><ShieldCheck className="mt-0.5 shrink-0" size={18} /><div><b>Privacidad:</b> esta versión procesa los DOCX localmente, guarda datos en IndexedDB y no tiene servidor, inicio de sesión ni sincronización. GitHub Pages solo publicará el código de la aplicación; no almacenará los expedientes.</div></div></section></main><footer className="container pb-8 text-xs text-slate-500">Generador de documentos por expediente · versión local-first</footer>{previewOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm"><div className="flex h-[min(92vh,900px)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-slate-100 shadow-2xl"><div className="flex items-center justify-between border-b bg-white px-5 py-4"><div><h2 className="font-semibold text-slate-900">Vista previa · Expediente {record ? String(record.number).padStart(3, "0") : ""}</h2><p className="text-xs text-slate-500">Revisión del documento generado antes de descargarlo</p></div><Button variant="outline" onClick={() => setPreviewOpen(false)}>Cerrar</Button></div><div className="flex-1 overflow-auto p-4"><div ref={previewRef} className="mx-auto min-h-full max-w-[850px] bg-white p-6 shadow-sm" /></div></div></div>}</div>;
+  const missingColumns = useMemo(() => markers.filter((marker) => FIELD_KEYS.includes(marker) && !excel?.columns.includes(marker)), [markers, excel]);
+  const unknownMarkers = useMemo(() => markers.filter((marker) => !FIELD_KEYS.includes(marker)), [markers]);
+
+  const chooseTemplate = async (file: File) => {
+    try {
+      if (!file.name.toLowerCase().endsWith(".docx")) throw new Error("Selecciona un archivo Word .docx.");
+      const buffer = await file.arrayBuffer();
+      setTemplate(buffer); setTemplateName(file.name); setMarkers(extractMarkers(buffer));
+      toast.success("Plantilla Word cargada.");
+    } catch (error) { toast.error(error instanceof Error ? error.message : "No se pudo leer la plantilla."); }
+  };
+
+  const chooseExcel = async (file: File) => {
+    try {
+      if (!/\.(xlsx|xls)$/i.test(file.name)) throw new Error("Selecciona un archivo Excel .xlsx o .xls.");
+      setExcel(await readExcel(file)); setExcelName(file.name);
+      toast.success("Excel cargado y validado.");
+    } catch (error) { setExcel(null); toast.error(error instanceof Error ? error.message : "No se pudo leer el Excel."); }
+  };
+
+  const generate = async () => {
+    if (!template || !excel) return toast.error("Carga una plantilla Word y un archivo Excel.");
+    if (!outputName.toLowerCase().endsWith(".docx")) return toast.error("El nombre de salida debe terminar en .docx.");
+    setBusy(true);
+    try {
+      const documents = excel.rows.map((row) => renderRow(template, row));
+      download(mergeDocxDocuments(documents), outputName);
+      toast.success(`Se generó un Word único con ${documents.length} registro(s).`);
+    } catch (error) { toast.error(error instanceof Error ? error.message : "No se pudo generar el documento."); }
+    finally { setBusy(false); }
+  };
+
+  return <div className="min-h-screen bg-[#f4f6f4] text-slate-900">
+    <header className="border-b bg-[#0f2f2b] text-white"><div className="container py-7"><div className="flex items-center gap-3"><div className="rounded-xl bg-[#d2f34c] p-2 text-[#0f2f2b]"><FileText size={22} /></div><span className="text-xs font-semibold uppercase tracking-[.24em] text-[#d2f34c]">Herramienta local</span></div><h1 className="mt-3 text-3xl font-semibold tracking-tight">Generador desde Excel</h1><p className="mt-1 text-sm text-emerald-100/75">Una plantilla Word de varias páginas · un registro por fila · un documento final</p></div></header>
+    <main className="container space-y-6 py-8">
+      <section className="grid gap-6 lg:grid-cols-[1.1fr_.9fr]">
+        <Card className="border-0 shadow-sm"><CardHeader><CardTitle>1. Cargar archivos</CardTitle><CardDescription>Usa una sola plantilla .docx y un Excel con una fila por documento.</CardDescription></CardHeader><CardContent className="space-y-4">
+          <label className="block cursor-pointer rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 hover:border-emerald-700 hover:bg-emerald-50"><input type="file" accept=".docx" className="sr-only" onChange={(event) => event.target.files?.[0] && chooseTemplate(event.target.files[0])} /><div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500"><FileText size={15} /> Plantilla Word</div><div className="mt-2 truncate text-sm font-medium">{templateName || "Seleccionar plantilla de varias páginas"}</div><div className="mt-2 flex items-center gap-1 text-xs text-emerald-800"><Upload size={14} /> Elegir archivo .docx</div></label>
+          <label className="block cursor-pointer rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 hover:border-emerald-700 hover:bg-emerald-50"><input type="file" accept=".xlsx,.xls" className="sr-only" onChange={(event) => event.target.files?.[0] && chooseExcel(event.target.files[0])} /><div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500"><FileSpreadsheet size={15} /> Datos Excel</div><div className="mt-2 truncate text-sm font-medium">{excelName || "Seleccionar archivo Excel"}</div><div className="mt-2 flex items-center gap-1 text-xs text-emerald-800"><Upload size={14} /> Elegir .xlsx o .xls</div></label>
+          <div><label className="text-sm font-medium" htmlFor="output">Nombre del documento final</label><input id="output" value={outputName} onChange={(event) => setOutputName(event.target.value)} className="mt-2 h-10 w-full rounded-md border bg-white px-3 text-sm" /></div>
+          <Button className="w-full" onClick={generate} disabled={busy || !template || !excel}><Download size={16} /> {busy ? "Generando…" : "Generar un Word único"}</Button>
+        </CardContent></Card>
+        <Card className="border-0 bg-[#e8efe8] shadow-sm"><CardHeader><CardTitle>Campos aceptados</CardTitle><CardDescription>Los nombres de las columnas Excel deben coincidir con estos campos.</CardDescription></CardHeader><CardContent className="space-y-2">{FIELD_KEYS.map((field) => <div key={field} className="flex items-center justify-between rounded-lg bg-white/70 px-3 py-2 text-sm"><span>{FIELD_LABELS[field]}</span><code className="text-[11px] text-emerald-800">{`{${field}}`}</code></div>)}<div className="mt-4 flex gap-2 text-xs text-slate-600"><Info size={15} className="mt-0.5 shrink-0" /><span>Los campos compuestos vienen directamente de Excel. La aplicación no los vuelve a construir ni los mezcla con otros nombres.</span></div></CardContent></Card>
+      </section>
+      {(template || excel) && <section className="grid gap-6 lg:grid-cols-[1fr_1fr]"><Card className="border-0 shadow-sm"><CardHeader><div className="flex items-center justify-between"><div><CardTitle className="text-base">2. Validación de correspondencia</CardTitle><CardDescription>Revisión antes de generar.</CardDescription></div><Badge variant="secondary">{excel ? `${excel.rows.length} fila(s)` : "Sin Excel"}</Badge></div></CardHeader><CardContent className="space-y-3">{template && <div><b className="text-sm">Marcadores detectados en Word</b><div className="mt-2 flex flex-wrap gap-2">{markers.length ? markers.map((marker) => <code key={marker} className={`rounded px-2 py-1 text-xs ${excel?.columns.includes(marker) ? "bg-emerald-100 text-emerald-900" : "bg-amber-100 text-amber-900"}`}>{`{${marker}}`}</code>) : <span className="text-sm text-slate-500">No se detectaron marcadores.</span>}</div></div>}{missingColumns.length > 0 && <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Faltan en Excel: <b>{missingColumns.map((field) => `{${field}}`).join(", ")}</b>. Se dejarán vacíos.</div>}{unknownMarkers.length > 0 && <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Marcadores no definidos en el flujo: <b>{unknownMarkers.map((field) => `{${field}}`).join(", ")}</b>. Revisa el nombre para evitar confusiones.</div>}{excel?.ignoredColumns.length ? <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">Columnas no utilizadas: {excel.ignoredColumns.join(", ")}</div> : null}</CardContent></Card><Card className="border-0 shadow-sm"><CardHeader><CardTitle className="text-base">Muestra de Excel</CardTitle><CardDescription>Primera fila que se pasará a Word.</CardDescription></CardHeader><CardContent>{excel ? <div className="space-y-2">{FIELD_KEYS.map((field) => <div key={field} className="flex justify-between gap-4 border-b py-2 text-sm"><span className="text-slate-500">{field}</span><span className="max-w-[60%] whitespace-pre-line text-right font-medium">{excel.rows[0]?.[field] || "(vacío)"}</span></div>)}</div> : <span className="text-sm text-slate-500">Carga un Excel para ver sus datos.</span>}</CardContent></Card></section>}
+      <section className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4 text-sm text-emerald-950"><div className="flex gap-3"><ShieldCheck className="mt-0.5 shrink-0" size={18} /><div><b>Privacidad:</b> el Excel y el DOCX se procesan dentro del navegador. No se envían a un servidor ni se guardan en el repositorio.</div></div></section>
+      <Separator /><p className="text-xs text-slate-500">Cada fila de Excel produce una copia completa de la plantilla, incluyendo todas sus páginas. Las copias se unen con un salto de página en un único archivo Word.</p>
+    </main>
+  </div>;
 }

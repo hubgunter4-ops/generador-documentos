@@ -1,16 +1,21 @@
-# Instrucciones de prueba
+# Instrucciones de uso
 
-1. Abra la aplicación.
-2. En la sección **Preparar plantillas**, pulse **Crear lote** sin cargar archivos para usar las tres plantillas de prueba.
-3. Cambie el número de expedientes si desea un lote mayor; el rango permitido es de 50 a 500.
-4. Seleccione un expediente.
-5. Escriba los datos en el cuadro compartido utilizando etiquetas como `(yo)`, `(papá)`, `(mamá)`, `(padrino)` y `(madrina)`. Para dos nombres relacionados puede usar `(padrinos)` con un nombre por línea.
-6. Espere el estado **Cambios guardados**.
-7. Descargue un documento individual, el ZIP del expediente o el ZIP completo.
-8. Use **Exportar JSON** para crear un respaldo editable antes de importar otro respaldo.
+1. Prepare una plantilla Word `.docx` de una o varias páginas.
+2. En Word, coloque marcadores como `{persona_nombre}`, `{mis_padres}`, `{mis_padrinos}`, `{abuelos_paternos}`, `{abuelos_maternos}`, `{el_sr}` y `{la_sra}`.
+3. Prepare un Excel con una fila de encabezados y una fila por documento. Use exactamente los mismos nombres, sin llaves, por ejemplo `persona_nombre` y `mis_padres`.
+4. Abra la aplicación y seleccione la plantilla Word.
+5. Seleccione el archivo Excel.
+6. Revise la correspondencia: los marcadores verdes tienen una columna; los amarillos requieren atención.
+7. Escriba el nombre del archivo final y pulse **Generar un Word único**.
 
-El cambio en un expediente no modifica los demás. Los padres y padrinos se guardan como personas individuales y los campos compuestos `mis_padres` y `mis_padrinos` se construyen al generar cada documento. No uses `(nombre)`: es ambiguo. Repetir un campo con el mismo valor es válido; repetirlo con un valor distinto produce una advertencia y no sustituye silenciosamente el primer valor.
+Cada fila de Excel produce una copia completa de la plantilla. Las copias se unen en el orden de las filas y se separan con un salto de página. Una plantilla de cuatro páginas con tres filas produce doce páginas, salvo que el contenido provoque saltos adicionales.
 
-## Plantillas definitivas
+## Datos y campos
 
-Al crear un nuevo lote, cargue exactamente tres archivos `.docx`. Prepare los marcadores dentro de Word con las claves documentadas en el README. Las plantillas de un lote no se modifican al generar descargas.
+Los campos compuestos (`mis_padres`, `mis_padrinos`, `abuelos_paternos`, `abuelos_maternos`, `el_sr` y `la_sra`) vienen ya preparados en Excel. La aplicación los pasa a Word tal como están escritos y no solicita datos adicionales ni los combina con otros nombres.
+
+La columna `persona_nombre` corresponde al marcador `{persona_nombre}`. No uses etiquetas genéricas o columnas duplicadas; el programa valida las columnas repetidas y avisa de nombres no reconocidos.
+
+## Privacidad
+
+El Excel y el DOCX se procesan localmente en el navegador. No se envían a un servidor ni deben guardarse dentro del repositorio.

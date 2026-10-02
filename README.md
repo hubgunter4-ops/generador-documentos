@@ -1,41 +1,63 @@
-# Generador de documentos por expediente
+# Generador de documentos desde Excel
 
-Aplicación estática local-first para cargar tres plantillas `.docx`, definir un rango de 50 a 500 expedientes, introducir variables en un solo cuadro y descargar documentos Word o ZIP.
+Aplicación local-first para cargar **una plantilla Word `.docx` de varias páginas** y un archivo Excel `.xlsx`/`.xls`. Cada fila del Excel genera una copia completa de la plantilla; todas las copias se unen en un único documento Word descargable.
 
-## Rango de expedientes
+## Flujo
 
-Se puede escribir un número (`50`) o un rango (`1-50`, `101-150`). La aplicación crea expedientes independientes y conserva el número indicado.
+```text
+Plantilla Word de varias páginas + Excel con una fila por registro
+                              ↓
+              Un documento Word final con todas las copias
+```
 
-## Variables y correlación
+Los archivos se procesan dentro del navegador. No se suben a un servidor ni se guardan en GitHub.
 
-La entrada compartida reconoce:
+## Columnas Excel y marcadores Word
 
-- `(yo)` o `(mi nombre)` → `{persona_nombre}` en los documentos 1, 2 y 3.
-- `(papá)` o `(padre)` → `{padre_nombre}`.
-- `(mamá)` o `(madre)` → `{madre_nombre}`.
-- `(abuelo paterno)` → `{abuelo_paterno}`.
-- `(abuela paterna)` → `{abuela_paterna}`.
-- `(abuelo materno)` → `{abuelo_materno}`.
-- `(abuela materna)` → `{abuela_materna}`.
-- `(padrino)` → `{padrino_nombre}` y `(madrina)` → `{madrina_nombre}`.
-- `(padrinos)` o `(mis padrinos)` → **dos nombres de padrinos**, capturados en dos líneas o unidos por `E`.
+Usa exactamente estos nombres como encabezados de Excel y marcadores de Word:
 
-No uses la etiqueta genérica `(nombre)`: es ambigua y no se procesa. Si un mismo campo aparece más de una vez con el mismo valor, se acepta; si aparece con valores distintos, la aplicación muestra una advertencia y conserva el primer valor para evitar confusiones.
+| Campo | Encabezado Excel | Marcador Word |
+|---|---|---|
+| Yo | `persona_nombre` | `{persona_nombre}` |
+| Mis padres | `mis_padres` | `{mis_padres}` |
+| Mis padrinos | `mis_padrinos` | `{mis_padrinos}` |
+| Abuelos paternos | `abuelos_paternos` | `{abuelos_paternos}` |
+| Abuelos maternos | `abuelos_maternos` | `{abuelos_maternos}` |
+| El Sr. | `el_sr` | `{el_sr}` |
+| La Sra. | `la_sra` | `{la_sra}` |
 
-La plantilla define cómo se presentan:
+Los campos compuestos se toman directamente de Excel. La aplicación no intenta reconstruirlos, separarlos ni mezclarlos con otros campos.
 
-| Marcador Word | Resultado |
-|---|---|
-| `{el_sr}` | Primer nombre de padrino, con el tratamiento `El Sr.` colocado en la plantilla |
-| `{la_sra}` | Segundo nombre de padrino, con el tratamiento `La Sra.` colocado en la plantilla |
-| `{mis_padrinos}` | Los dos nombres, en dos líneas y en el orden capturado |
+> Cada fila representa un documento. Si la plantilla tiene cuatro páginas y Excel tiene tres filas, el resultado tendrá las tres copias completas, separadas por saltos de página.
 
-Así, un documento puede usar `{el_sr}` y `{la_sra}`, mientras otro utiliza `{mis_padrinos}`, sin volver a solicitar los nombres.
+## Reglas para evitar confusiones
 
-Los grupos `(mis padres)`, `(abuelos paternos)` y `(abuelos maternos)` aceptan dos líneas en el orden definido. Los abuelos se incorporan únicamente en las plantillas que contengan sus marcadores; si un documento no los solicita, no se le agregan datos.
+- Cada campo debe tener una sola columna en Excel.
+- No repitas columnas equivalentes con nombres distintos; usa los siete nombres canónicos anteriores.
+- Los marcadores deben escribirse con una sola llave a cada lado, por ejemplo `{mis_padres}`.
+- Los marcadores desconocidos se muestran como advertencia antes de generar.
+- Las columnas Excel no reconocidas se muestran como no utilizadas y no se copian a Word.
+- Si falta una columna correspondiente a un marcador, ese marcador quedará vacío y se mostrará una advertencia.
+
+## Uso
+
+1. Abre la aplicación.
+2. Selecciona una plantilla `.docx` de varias páginas.
+3. Selecciona el archivo Excel con una fila por registro.
+4. Revisa los marcadores detectados, las columnas reconocidas y la primera fila de muestra.
+5. Define el nombre del documento final.
+6. Pulsa **Generar un Word único**.
+
+## Desarrollo
+
+```bash
+pnpm install --frozen-lockfile
+pnpm check
+pnpm build
+```
+
+El build genera `dist/public` para GitHub Pages y `dist/index.js` para el servidor de preview.
 
 ## Privacidad
 
-Los DOCX se procesan dentro del navegador. Las plantillas y expedientes se guardan en IndexedDB del perfil local; los respaldos se exportan manualmente como JSON. No existe servidor, autenticación ni sincronización remota.
-
-GitHub Pages puede publicar el código, pero no es un repositorio privado de expedientes. No coloque documentos personales ni respaldos JSON dentro del repositorio.
+El procesamiento del Excel y del DOCX ocurre completamente en el navegador mediante SheetJS, PizZip y Docxtemplater. No existe servidor de datos ni autenticación. No subas datos personales al repositorio.
