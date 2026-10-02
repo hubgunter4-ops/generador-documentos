@@ -8,6 +8,7 @@ import re
 
 import pandas as pd
 from docx import Document
+from docx.enum.text import WD_BREAK
 from docxcompose.composer import Composer
 
 
@@ -126,6 +127,11 @@ def replace_in_document(document: Document, data: dict[str, Any]) -> None:
     fill_visible_category_tables(document, data)
 
 
+def add_page_break_at_end(document: Document) -> None:
+    """Make the next appended Excel record begin on a new physical page."""
+    document.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
+
+
 def find_unresolved_placeholders(document: Document) -> list[str]:
     texts = [p.text for p in document.paragraphs]
     for table in document.tables:
@@ -183,6 +189,8 @@ def merge_excel_into_one_docx(
         for index, (_, row) in enumerate(records.iterrows(), start=1):
             document = Document(str(template_path))
             replace_in_document(document, row.to_dict())
+            if index < total:
+                add_page_break_at_end(document)
             item = temp / f"registro_{index}.docx"
             document.save(item)
             generated.append(item)
