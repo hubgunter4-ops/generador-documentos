@@ -18,15 +18,14 @@ Usa exactamente estos nombres como encabezados de Excel y marcadores de Word:
 
 | Campo | Encabezado Excel | Marcador Word |
 |---|---|---|
-| Yo | `persona_nombre` | `{persona_nombre}` |
+| Yo | `yo` | `{yo}` |
 | Mis padres | `mis_padres` | `{mis_padres}` |
 | Mis padrinos | `mis_padrinos` | `{mis_padrinos}` |
 | Abuelos paternos | `abuelos_paternos` | `{abuelos_paternos}` |
 | Abuelos maternos | `abuelos_maternos` | `{abuelos_maternos}` |
-| El Sr. | `el_sr` | `{el_sr}` |
-| La Sra. | `la_sra` | `{la_sra}` |
+| El Sr. y la Sra. | `el_sr_y_la_sra` | `{el_sr_y_la_sra}` |
 
-Los campos compuestos se toman directamente de Excel. La aplicación no intenta reconstruirlos, separarlos ni mezclarlos con otros campos.
+Los campos compuestos se toman directamente de Excel. La aplicación no intenta reconstruirlos, separarlos ni mezclarlos con otros campos. También acepta `{persona_nombre}` como alias de `{yo}` cuando se usa una plantilla anterior.
 
 > Cada fila representa un documento. Si la plantilla tiene cuatro páginas y Excel tiene tres filas, el resultado tendrá las tres copias completas, separadas por saltos de página.
 

@@ -10,21 +10,19 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 
 const FIELD_LABELS: Record<string, string> = {
-  persona_nombre: "Yo",
   mis_padres: "Mis padres",
   mis_padrinos: "Mis padrinos",
   abuelos_paternos: "Abuelos paternos",
-  abuelos_maternos: "Abuelos maternos",
-  el_sr: "El Sr.",
-  la_sra: "La Sra.",
+  el_sr_y_la_sra: "El Sr. y la Sra.",
+  yo: "Yo",
 };
 const FIELD_KEYS = Object.keys(FIELD_LABELS);
-type FieldKey = keyof typeof FIELD_LABELS;
 type ExcelRow = Record<string, string>;
 type ExcelData = { rows: ExcelRow[]; columns: string[]; ignoredColumns: string[] };
 
 function normalizeField(value: string) {
-  return value.trim().replace(/^\{+|\}+$/g, "").toLowerCase();
+  const field = value.trim().replace(/^\{+|\}+$/g, "").toLowerCase();
+  return field === "persona_nombre" ? "yo" : field;
 }
 
 function cellText(value: unknown) {
@@ -65,12 +63,58 @@ function extractMarkers(buffer: ArrayBuffer) {
     .filter((name) => name.endsWith(".xml") && (name.includes("document") || name.includes("header") || name.includes("footer")))
     .map((name) => zip.file(name)?.asText() ?? "")
     .join(" ");
-  return Array.from(new Set(Array.from(xml.matchAll(/\{([^{}]+)\}/g)).map((match) => normalizeField(match[1])))).filter(Boolean);
+  const explicit = Array.from(new Set(Array.from(xml.matchAll(/\{([^{}]+)\}/g)).map((match) => normalizeField(match[1])))).filter(Boolean);
+  if (explicit.length) return explicit;
+  return FIELD_KEYS.filter((field) => xml.includes(field));
 }
 
-function renderRow(template: ArrayBuffer, row: ExcelRow) {
+function hasExplicitMarkers(buffer: ArrayBuffer) {
+  const zip = new PizZip(buffer.slice(0));
+  return Object.keys(zip.files)
+    .filter((name) => name.endsWith(".xml") && (name.includes("document") || name.includes("header") || name.includes("footer")))
+    .some((name) => /\{([^{}]+)\}/.test(zip.file(name)?.asText() ?? ""));
+}
+
+function escapeXml(value: string) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+
+function injectCategoryValues(zip: PizZip, row: ExcelRow) {
+  const file = zip.file("word/document.xml");
+  const xml = file?.asText();
+  if (!xml) throw new Error("La plantilla Word no contiene word/document.xml.");
+  let updated = xml;
+  const tables = Array.from(xml.matchAll(/<w:tbl\b[^>]*>[\s\S]*?<\/w:tbl>/g)).map((match) => match[0]);
+  const plain = (value: string) => value.replace(/<[^>]+>/g, "");
+  for (const field of FIELD_KEYS) {
+    const table = tables.find((candidate) => plain(candidate).includes(field));
+    if (!table) continue;
+    const rows = Array.from(table.matchAll(/<w:tr\b[^>]*>[\s\S]*?<\/w:tr>/g)).map((match) => match[0]);
+    const headerIndex = rows.findIndex((candidate) => plain(candidate).includes(field));
+    const headerCells = headerIndex >= 0 ? Array.from(rows[headerIndex].matchAll(/<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g)).map((match) => match[0]) : [];
+    const columnIndex = headerCells.findIndex((candidate) => plain(candidate).includes(field));
+    const targetRow = rows[headerIndex + 1];
+    const targetCells = targetRow ? Array.from(targetRow.matchAll(/<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g)).map((match) => match[0]) : [];
+    const cell = columnIndex >= 0 ? targetCells[columnIndex] : undefined;
+    if (!cell) continue;
+    let replaced = false;
+    const nextCell = cell.replace(/(<w:t\b[^>]*>)([^<]*_{3,}[^<]*)(<\/w:t>)/g, (_match, start, _placeholder, end) => {
+      if (replaced) return `${start}${end}`;
+      replaced = true;
+      return `${start}${escapeXml(row[field] ?? "")}${end}`;
+    });
+    updated = updated.replace(cell, nextCell);
+  }
+  zip.file("word/document.xml", updated);
+  return zip;
+}
+
+function renderRow(template: ArrayBuffer, row: ExcelRow, hasExplicitMarkers: boolean) {
+  if (!hasExplicitMarkers) return injectCategoryValues(new PizZip(template.slice(0)), row).generate({ type: "arraybuffer", compression: "DEFLATE" }) as ArrayBuffer;
   const engine = new Docxtemplater(new PizZip(template.slice(0)), { paragraphLoop: true, linebreaks: true, nullGetter: () => "" });
-  engine.render(Object.fromEntries(FIELD_KEYS.map((key) => [key, row[key] ?? ""])));
+  const values = Object.fromEntries(FIELD_KEYS.map((key) => [key, row[key] ?? ""]));
+  values.persona_nombre = row.yo ?? "";
+  engine.render(values);
   return engine.getZip().generate({ type: "arraybuffer", compression: "DEFLATE" }) as ArrayBuffer;
 }
 
@@ -103,6 +147,7 @@ export default function App() {
   const [template, setTemplate] = useState<ArrayBuffer | null>(null);
   const [templateName, setTemplateName] = useState("");
   const [markers, setMarkers] = useState<string[]>([]);
+  const [explicitMarkers, setExplicitMarkers] = useState(false);
   const [excelName, setExcelName] = useState("");
   const [excel, setExcel] = useState<ExcelData | null>(null);
   const [outputName, setOutputName] = useState("documentos_generados.docx");
@@ -115,7 +160,7 @@ export default function App() {
     try {
       if (!file.name.toLowerCase().endsWith(".docx")) throw new Error("Selecciona un archivo Word .docx.");
       const buffer = await file.arrayBuffer();
-      setTemplate(buffer); setTemplateName(file.name); setMarkers(extractMarkers(buffer));
+      setTemplate(buffer); setTemplateName(file.name); setMarkers(extractMarkers(buffer)); setExplicitMarkers(hasExplicitMarkers(buffer));
       toast.success("Plantilla Word cargada.");
     } catch (error) { toast.error(error instanceof Error ? error.message : "No se pudo leer la plantilla."); }
   };
@@ -133,7 +178,7 @@ export default function App() {
     if (!outputName.toLowerCase().endsWith(".docx")) return toast.error("El nombre de salida debe terminar en .docx.");
     setBusy(true);
     try {
-      const documents = excel.rows.map((row) => renderRow(template, row));
+      const documents = excel.rows.map((row) => renderRow(template, row, explicitMarkers));
       download(mergeDocxDocuments(documents), outputName);
       toast.success(`Se generó un Word único con ${documents.length} registro(s).`);
     } catch (error) { toast.error(error instanceof Error ? error.message : "No se pudo generar el documento."); }
